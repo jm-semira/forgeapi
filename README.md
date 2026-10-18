@@ -1,5 +1,7 @@
 # ForgeAPI
 
+![Go Tests](https://github.com/jm-semira/forgeapi/actions/workflows/go-test.yml/badge.svg)
+
 **Forge your API. Focus on your logic.**
 
 ForgeAPI is a Go library that generates RESTful CRUD endpoints for registered GORM models. It is intended for Go developers who want to reduce repetitive CRUD handler code while keeping their application-specific business logic in their own application.
@@ -72,13 +74,13 @@ The example uses the public `New`, `WithDatabase`, `Register`, and `Run` APIs. `
 
 For the `Product` model above, ForgeAPI registers these routes under `/products`:
 
-| Method | Route | Purpose | Responses and notable errors |
-| --- | --- | --- | --- |
-| `GET` | `/products` | Return all records as a JSON array. | `200 OK`; `500 Internal Server Error` for a database error. |
-| `GET` | `/products/{id}` | Return the first matching record as JSON. | `200 OK`; `404 Not Found` when no record exists; `500 Internal Server Error` for another database error. |
-| `POST` | `/products` | Decode a JSON model and create it. | `201 Created` with the created record; `400 Bad Request` for invalid JSON; `500 Internal Server Error` for a database error. |
-| `PATCH` | `/products/{id}` | Apply JSON object fields as GORM updates, then return the record. | `200 OK`; `400 Bad Request` for a non-numeric ID, invalid JSON, or an empty object; `404 Not Found` if the record does not exist; `500 Internal Server Error` for a database error. |
-| `DELETE` | `/products/{id}` | Delete the record matching the ID. | `204 No Content`; `400 Bad Request` for a non-numeric ID; `404 Not Found` if no row was affected; `500 Internal Server Error` for a database error. |
+| Method   | Route            | Purpose                                                           | Responses and notable errors                                                                                                                                                        |
+| -------- | ---------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/products`      | Return all records as a JSON array.                               | `200 OK`; `500 Internal Server Error` for a database error.                                                                                                                         |
+| `GET`    | `/products/{id}` | Return the first matching record as JSON.                         | `200 OK`; `404 Not Found` when no record exists; `500 Internal Server Error` for another database error.                                                                            |
+| `POST`   | `/products`      | Decode a JSON model and create it.                                | `201 Created` with the created record; `400 Bad Request` for invalid JSON; `500 Internal Server Error` for a database error.                                                        |
+| `PATCH`  | `/products/{id}` | Apply JSON object fields as GORM updates, then return the record. | `200 OK`; `400 Bad Request` for a non-numeric ID, invalid JSON, or an empty object; `404 Not Found` if the record does not exist; `500 Internal Server Error` for a database error. |
+| `DELETE` | `/products/{id}` | Delete the record matching the ID.                                | `204 No Content`; `400 Bad Request` for a non-numeric ID; `404 Not Found` if no row was affected; `500 Internal Server Error` for a database error.                                 |
 
 The ID parsing and update/delete queries assume an `id` primary key compatible with GORM's usual conventions. `DELETE` follows GORM model behavior: models with GORM soft-delete fields are soft-deleted. Unknown methods or paths are handled by `http.ServeMux`.
 
