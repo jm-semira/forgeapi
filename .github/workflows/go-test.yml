@@ -1,4 +1,3 @@
-
 name: Go Tests
 
 on:
@@ -7,7 +6,7 @@ on:
 
 jobs:
   test:
-    name: Run Go Tests
+    name: Run Go Checks
     runs-on: ubuntu-latest
 
     steps:
@@ -23,5 +22,26 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Run tests
-        run: go test ./...
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests with coverage
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Display coverage summary
+        if: always()
+        run: |
+          if [ -f coverage.out ]; then
+            go tool cover -func=coverage.out
+          else
+            echo "Coverage report was not generated."
+          fi
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage-report
+          path: coverage.out
+          if-no-files-found: ignore
+          retention-days: 14
