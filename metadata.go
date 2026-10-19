@@ -12,6 +12,7 @@ import (
 type modelMetadata struct {
 	primaryKeyColumn string
 	primaryKeyType   reflect.Type
+	fields           map[string]bool
 }
 
 func resolveModelMetadata(db *gorm.DB, model any) (modelMetadata, error) {
@@ -43,8 +44,26 @@ func resolveModelMetadata(db *gorm.DB, model any) (modelMetadata, error) {
 		return modelMetadata{}, ErrInvalidModelMetadata
 	}
 
+	fields := make(map[string]bool, len(stmt.Schema.Fields))
+
+	for _, field := range stmt.Schema.Fields {
+		if field.PrimaryKey || field.DBName == "" {
+			continue
+		}
+
+		if strings.Contains(
+			","+field.Tag.Get("forgeapi")+",",
+			",readonly,",
+		) {
+			continue
+		}
+
+		fields[field.Name] = true
+	}
+
 	return modelMetadata{
 		primaryKeyColumn: taggedField.DBName,
 		primaryKeyType:   taggedField.FieldType,
+		fields:           fields,
 	}, nil
 }

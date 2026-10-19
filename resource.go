@@ -139,6 +139,13 @@ func (app *API) Register(model any) error {
 			return
 		}
 
+		for field := range updates {
+			if !metadata.fields[field] {
+				http.Error(w, "unknown update field", http.StatusBadRequest)
+				return
+			}
+		}
+
 		// check if record is existing
 		record := reflect.New(modelType).Interface()
 
