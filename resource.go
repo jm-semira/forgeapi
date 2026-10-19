@@ -89,23 +89,57 @@ func (app *API) Register(model any) error {
 	})
 
 	app.mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
-		record := reflect.New(modelType).Interface()
-
-		if err := json.NewDecoder(r.Body).Decode(record); err != nil {
-			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
 
-		result := app.db.WithContext(r.Context()).Create(record)
-		if result.Error != nil {
+		// Decode one JSON object and reject trailing JSON.
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.DisallowUnknownFields()
+
+		var fields map[string]json.RawMessage
+		if err := decoder.Decode(&fields); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		if len(fields) == 0 {
+			http.Error(w, "empty request body", http.StatusBadRequest)
+			return
+		}
+
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Validate supplied field names against the writable-field allowlist.
+		for field := range fields {
+			if _, ok := metadata.fields[field]; !ok {
+				http.Error(w, "unknown or read-only field", http.StatusBadRequest)
+				return
+			}
+		}
+
+		// Decode into the registered model type.
+		record := reflect.New(modelType).Interface()
+		if err := json.Unmarshal(body, record); err != nil {
+			http.Error(w, "invalid field value", http.StatusBadRequest)
+			return
+		}
+
+		// Persist the new record.
+		if err := app.db.WithContext(r.Context()).Create(record).Error; err != nil {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-
 		if err := json.NewEncoder(w).Encode(record); err != nil {
+			// The response status has already been written.
 			return
 		}
 	})
@@ -143,18 +177,19 @@ func (app *API) Register(model any) error {
 		typedUpdates := make(map[string]any, len(updates))
 
 		for field, raw := range updates {
-			fieldType, ok := metadata.fields[field]
+			fieldInfo, ok := metadata.fields[field]
 			if !ok {
 				http.Error(w, "unknown or read-only update field", http.StatusBadRequest)
 				return
 			}
+			fieldType := fieldInfo.typeOf
 
 			raw = bytes.TrimSpace(raw)
 
 			if bytes.Equal(raw, []byte("null")) {
 				switch fieldType.Kind() {
 				case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice:
-					typedUpdates[field] = reflect.Zero(fieldType).Interface()
+					typedUpdates[fieldInfo.dbName] = reflect.Zero(fieldType).Interface()
 					continue
 				default:
 					http.Error(w, "invalid field value", http.StatusBadRequest)
@@ -169,7 +204,7 @@ func (app *API) Register(model any) error {
 				return
 			}
 
-			typedUpdates[field] = value.Elem().Interface()
+			typedUpdates[fieldInfo.dbName] = value.Elem().Interface()
 		}
 
 		// check if record is existing

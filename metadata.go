@@ -12,7 +12,12 @@ import (
 type modelMetadata struct {
 	primaryKeyColumn string
 	primaryKeyType   reflect.Type
-	fields           map[string]reflect.Type
+	fields           map[string]fieldMetadata
+}
+
+type fieldMetadata struct {
+	typeOf reflect.Type
+	dbName string
 }
 
 func resolveModelMetadata(db *gorm.DB, model any) (modelMetadata, error) {
@@ -44,7 +49,7 @@ func resolveModelMetadata(db *gorm.DB, model any) (modelMetadata, error) {
 		return modelMetadata{}, ErrInvalidModelMetadata
 	}
 
-	fields := make(map[string]reflect.Type, len(stmt.Schema.Fields))
+	fields := make(map[string]fieldMetadata, len(stmt.Schema.Fields))
 
 	for _, field := range stmt.Schema.Fields {
 		if field.PrimaryKey || field.DBName == "" {
@@ -58,7 +63,20 @@ func resolveModelMetadata(db *gorm.DB, model any) (modelMetadata, error) {
 			continue
 		}
 
-		fields[field.Name] = field.FieldType
+		jsonName := strings.Split(field.Tag.Get("json"), ",")[0]
+
+		if jsonName == "-" {
+			continue
+		}
+
+		if jsonName == "" {
+			jsonName = field.Name
+		}
+
+		fields[jsonName] = fieldMetadata{
+			typeOf: field.FieldType,
+			dbName: field.DBName,
+		}
 	}
 
 	return modelMetadata{
