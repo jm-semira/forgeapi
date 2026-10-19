@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
@@ -121,7 +122,14 @@ func (app *API) Register(model any) error {
 		updates := map[string]any{}
 		model := reflect.New(modelType).Interface()
 
-		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		decoder := json.NewDecoder(r.Body)
+
+		if err := decoder.Decode(&updates); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
 			http.Error(w, "invalid JSON body", http.StatusBadRequest)
 			return
 		}
