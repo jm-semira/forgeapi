@@ -1,15 +1,9 @@
 package forgeapi
 
 import (
-	"errors"
 	"net/http"
 
 	"gorm.io/gorm"
-)
-
-var (
-	ErrDatabaseRequired = errors.New("forgeapi: database is required")
-	ErrInvalidModel     = errors.New("forgeapi: model must be a non-nil pointer to a struct")
 )
 
 type Option func(*API)

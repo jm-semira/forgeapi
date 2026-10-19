@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
-	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (app *API) Register(model any) error {
@@ -29,6 +29,15 @@ func (app *API) Register(model any) error {
 	resource := pluralize(strings.ToLower(modelType.Name()))
 	path := "/" + resource
 
+	metadata, err := resolveModelMetadata(app.db, model)
+	if err != nil {
+		return err
+	}
+
+	if err := validateIdentifierType(metadata.primaryKeyType); err != nil {
+		return err
+	}
+
 	app.mux.HandleFunc("GET "+path, func(w http.ResponseWriter, r *http.Request) {
 		records := reflect.New(reflect.SliceOf(modelType)).Interface()
 
@@ -45,11 +54,22 @@ func (app *API) Register(model any) error {
 	})
 
 	app.mux.HandleFunc("GET "+path+"/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
+		id, err := parseIdentifier(
+			r.PathValue("id"),
+			metadata.primaryKeyType,
+		)
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
 
 		record := reflect.New(modelType).Interface()
 
-		result := app.db.WithContext(r.Context()).First(record, id)
+		result := app.db.WithContext(r.Context()).
+			Where(clause.Eq{
+				Column: clause.Column{Name: metadata.primaryKeyColumn},
+				Value:  id,
+			}).First(record)
 		if result.Error != nil {
 			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 				http.Error(w, "record not found", http.StatusNotFound)
@@ -89,9 +109,10 @@ func (app *API) Register(model any) error {
 	})
 
 	app.mux.HandleFunc("PATCH "+path+"/{id}", func(w http.ResponseWriter, r *http.Request) {
-		idStr := r.PathValue("id")
-
-		id, err := strconv.ParseUint(idStr, 10, 64)
+		id, err := parseIdentifier(
+			r.PathValue("id"),
+			metadata.primaryKeyType,
+		)
 		if err != nil {
 			http.Error(w, "invalid id", http.StatusBadRequest)
 			return
@@ -113,7 +134,11 @@ func (app *API) Register(model any) error {
 		// check if record is existing
 		record := reflect.New(modelType).Interface()
 
-		if err := app.db.WithContext(r.Context()).First(record, id).Error; err != nil {
+		if err := app.db.WithContext(r.Context()).
+			Where(clause.Eq{
+				Column: clause.Column{Name: metadata.primaryKeyColumn},
+				Value:  id,
+			}).First(record).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				http.Error(w, "record not found", http.StatusNotFound)
 				return
@@ -126,7 +151,10 @@ func (app *API) Register(model any) error {
 
 		result := app.db.WithContext(r.Context()).
 			Model(model).
-			Where("id = ?", id).
+			Where(clause.Eq{
+				Column: clause.Column{Name: metadata.primaryKeyColumn},
+				Value:  id,
+			}).
 			Updates(updates)
 		if result.Error != nil {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -135,7 +163,11 @@ func (app *API) Register(model any) error {
 
 		updated := reflect.New(modelType).Interface()
 
-		if err := app.db.WithContext(r.Context()).First(updated, id).Error; err != nil {
+		if err := app.db.WithContext(r.Context()).
+			Where(clause.Eq{
+				Column: clause.Column{Name: metadata.primaryKeyColumn},
+				Value:  id,
+			}).First(updated).Error; err != nil {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -149,9 +181,10 @@ func (app *API) Register(model any) error {
 	})
 
 	app.mux.HandleFunc("DELETE "+path+"/{id}", func(w http.ResponseWriter, r *http.Request) {
-		idStr := r.PathValue("id")
-
-		id, err := strconv.ParseUint(idStr, 10, 64)
+		id, err := parseIdentifier(
+			r.PathValue("id"),
+			metadata.primaryKeyType,
+		)
 		if err != nil {
 			http.Error(w, "invalid id", http.StatusBadRequest)
 			return
@@ -160,7 +193,10 @@ func (app *API) Register(model any) error {
 		model := reflect.New(modelType).Interface()
 
 		result := app.db.WithContext(r.Context()).
-			Where("id = ?", id).
+			Where(clause.Eq{
+				Column: clause.Column{Name: metadata.primaryKeyColumn},
+				Value:  id,
+			}).
 			Delete(model)
 
 		if result.Error != nil {

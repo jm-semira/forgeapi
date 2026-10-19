@@ -15,14 +15,36 @@ import (
 )
 
 type Product struct {
-	gorm.Model
+	forgeapi.Model
 	Name  string
 	Price float64
 }
 
-func TestRegisterProductList(t *testing.T) {
+type CustomProduct struct {
+	ProductID string `json:"product_id" gorm:"primaryKey" forgeapi:"id"`
+	Name      string `json:"name"`
+}
+
+type MissingIDProduct struct {
+	Name string
+}
+
+type InvalidIDProduct struct {
+	ProductID float64 `json:"product_id" gorm:"primaryKey" forgeapi:"id"`
+	Name      string  `json:"name"`
+}
+
+type CompositeIDProduct struct {
+	ProductID string `json:"product_id" gorm:"primaryKey" forgeapi:"id"`
+	TenantID  string `json:"tenant_id" gorm:"primaryKey"`
+	Name      string `json:"name"`
+}
+
+func setupTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
 	db, err := gorm.Open(
-		sqlite.Open("file:forgeapi_test?mode=memory&cache=shared"),
+		sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"),
 		&gorm.Config{},
 	)
 	if err != nil {
@@ -33,9 +55,54 @@ func TestRegisterProductList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		_ = sqlDB.Close()
 	})
+
+	return db
+}
+
+func TestRegisterModelWithUnsupportedIDType(t *testing.T) {
+	db := setupTestDB(t)
+
+	if err := db.AutoMigrate(&InvalidIDProduct{}); err != nil {
+		t.Fatal(err)
+	}
+
+	app := forgeapi.New(forgeapi.WithDatabase(db))
+
+	err := app.Register(&InvalidIDProduct{})
+	if !errors.Is(err, forgeapi.ErrUnsupportedIdentifierType) {
+		t.Fatalf(
+			"expected error %v, got %v",
+			forgeapi.ErrUnsupportedIdentifierType,
+			err,
+		)
+	}
+}
+
+func TestRegisterModelWithCompositePrimaryKey(t *testing.T) {
+	db := setupTestDB(t)
+
+	if err := db.AutoMigrate(&CompositeIDProduct{}); err != nil {
+		t.Fatal(err)
+	}
+
+	app := forgeapi.New(forgeapi.WithDatabase(db))
+
+	err := app.Register(&CompositeIDProduct{})
+	if !errors.Is(err, forgeapi.ErrInvalidModelMetadata) {
+		t.Fatalf(
+			"expected error %v, got %v",
+			forgeapi.ErrInvalidModelMetadata,
+			err,
+		)
+	}
+}
+
+func TestRegisterProductList(t *testing.T) {
+	db := setupTestDB(t)
 
 	if err := db.AutoMigrate(&Product{}); err != nil {
 		t.Fatal(err)
@@ -78,21 +145,7 @@ func TestRegisterProductList(t *testing.T) {
 }
 
 func TestGetProductByID(t *testing.T) {
-	db, err := gorm.Open(
-		sqlite.Open("file:get_product_by_id?mode=memory&cache=shared"),
-		&gorm.Config{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
+	db := setupTestDB(t)
 
 	if err := db.AutoMigrate(&Product{}); err != nil {
 		t.Fatal(err)
@@ -146,21 +199,7 @@ func TestGetProductByID(t *testing.T) {
 }
 
 func TestGetProductNotFound(t *testing.T) {
-	db, err := gorm.Open(
-		sqlite.Open("file:get_product_not_found?mode=memory&cache=shared"),
-		&gorm.Config{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
+	db := setupTestDB(t)
 
 	if err := db.AutoMigrate(&Product{}); err != nil {
 		t.Fatal(err)
@@ -191,21 +230,7 @@ func TestGetProductNotFound(t *testing.T) {
 }
 
 func TestPostProduct(t *testing.T) {
-	db, err := gorm.Open(
-		sqlite.Open("file:post_product?mode=memory&cache=shared"),
-		&gorm.Config{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
+	db := setupTestDB(t)
 
 	if err := db.AutoMigrate(&Product{}); err != nil {
 		t.Fatal(err)
@@ -258,21 +283,7 @@ func TestPostProduct(t *testing.T) {
 }
 
 func TestPatchProduct(t *testing.T) {
-	db, err := gorm.Open(
-		sqlite.Open("file:patch_product?mode=memory&cache=shared"),
-		&gorm.Config{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
+	db := setupTestDB(t)
 
 	if err := db.AutoMigrate(&Product{}); err != nil {
 		t.Fatal(err)
@@ -332,21 +343,7 @@ func TestPatchProduct(t *testing.T) {
 }
 
 func TestPatchProductNotFound(t *testing.T) {
-	db, err := gorm.Open(
-		sqlite.Open("file:patch_product_not_found?mode=memory&cache=shared"),
-		&gorm.Config{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
+	db := setupTestDB(t)
 
 	if err := db.AutoMigrate(&Product{}); err != nil {
 		t.Fatal(err)
@@ -381,21 +378,7 @@ func TestPatchProductNotFound(t *testing.T) {
 }
 
 func TestPatchProductInvalidID(t *testing.T) {
-	db, err := gorm.Open(
-		sqlite.Open("file:patch_product_invalid_id?mode=memory&cache=shared"),
-		&gorm.Config{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
+	db := setupTestDB(t)
 
 	if err := db.AutoMigrate(&Product{}); err != nil {
 		t.Fatal(err)
@@ -430,21 +413,7 @@ func TestPatchProductInvalidID(t *testing.T) {
 }
 
 func TestPatchProductEmptyBody(t *testing.T) {
-	db, err := gorm.Open(
-		sqlite.Open("file:patch_product_empty_body?mode=memory&cache=shared"),
-		&gorm.Config{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
+	db := setupTestDB(t)
 
 	if err := db.AutoMigrate(&Product{}); err != nil {
 		t.Fatal(err)
@@ -477,21 +446,7 @@ func TestPatchProductEmptyBody(t *testing.T) {
 }
 
 func TestDeleteProduct(t *testing.T) {
-	db, err := gorm.Open(
-		sqlite.Open("file:delete_product?mode=memory&cache=shared"),
-		&gorm.Config{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
+	db := setupTestDB(t)
 
 	if err := db.AutoMigrate(&Product{}); err != nil {
 		t.Fatal(err)
@@ -530,7 +485,7 @@ func TestDeleteProduct(t *testing.T) {
 	}
 
 	var got Product
-	err = db.First(&got, product.ID).Error
+	err := db.First(&got, product.ID).Error
 
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected product to be deleted, got error: %v", err)
@@ -538,21 +493,7 @@ func TestDeleteProduct(t *testing.T) {
 }
 
 func TestDeleteProductNotExist(t *testing.T) {
-	db, err := gorm.Open(
-		sqlite.Open("file:delete_product_not_exist?mode=memory&cache=shared"),
-		&gorm.Config{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
+	db := setupTestDB(t)
 
 	if err := db.AutoMigrate(&Product{}); err != nil {
 		t.Fatal(err)
@@ -584,21 +525,7 @@ func TestDeleteProductNotExist(t *testing.T) {
 }
 
 func TestDeleteProductInvalidID(t *testing.T) {
-	db, err := gorm.Open(
-		sqlite.Open("file:delete_product_invalid_id?mode=memory&cache=shared"),
-		&gorm.Config{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
+	db := setupTestDB(t)
 
 	if err := db.AutoMigrate(&Product{}); err != nil {
 		t.Fatal(err)
@@ -626,5 +553,196 @@ func TestDeleteProductInvalidID(t *testing.T) {
 			rec.Code,
 			rec.Body.String(),
 		)
+	}
+}
+
+func TestModelCreatesIDAndTimestamps(t *testing.T) {
+	db := setupTestDB(t)
+
+	if err := db.AutoMigrate(&Product{}); err != nil {
+		t.Fatal(err)
+	}
+
+	product := Product{
+		Name:  "Keyboard",
+		Price: 99.99,
+	}
+
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if product.ID == 0 {
+		t.Fatal("expected ID to be generated")
+	}
+
+	if product.CreatedAt.IsZero() {
+		t.Fatal("expected CreatedAt to be populated")
+	}
+
+	if product.UpdatedAt.IsZero() {
+		t.Fatal("expected UpdatedAt to be populated")
+	}
+}
+
+func TestGetProductByCustomID(t *testing.T) {
+	db := setupTestDB(t)
+
+	if err := db.AutoMigrate(&CustomProduct{}); err != nil {
+		t.Fatal(err)
+	}
+
+	product := CustomProduct{
+		ProductID: "sku-123",
+		Name:      "Keyboard",
+	}
+
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	app := forgeapi.New(forgeapi.WithDatabase(db))
+
+	if err := app.Register(&CustomProduct{}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/customproducts/sku-123",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+
+	app.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+
+	var got CustomProduct
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if got.ProductID != "sku-123" {
+		t.Errorf("expected ID sku-123, got %q", got.ProductID)
+	}
+}
+
+func TestRegisterModelWithoutID(t *testing.T) {
+	db := setupTestDB(t)
+	app := forgeapi.New(forgeapi.WithDatabase(db))
+
+	err := app.Register(&MissingIDProduct{})
+	if err == nil {
+		t.Fatal("expected error when registering a model without an ID")
+	}
+}
+
+func TestPatchProductByCustomID(t *testing.T) {
+	db := setupTestDB(t)
+
+	if err := db.AutoMigrate(&CustomProduct{}); err != nil {
+		t.Fatal(err)
+	}
+
+	product := CustomProduct{
+		ProductID: "sku-123",
+		Name:      "Mouse",
+	}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	app := forgeapi.New(forgeapi.WithDatabase(db))
+	if err := app.Register(&CustomProduct{}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		fmt.Sprintf("/customproducts/%s", product.ProductID),
+		strings.NewReader(`{
+			"Name":"Keyboard"
+		}`),
+	)
+
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	app.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusOK,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+
+	var got CustomProduct
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if got.ProductID != product.ProductID {
+		t.Errorf("expected udpted product to have %s, got %s ID", product.ProductID, got.ProductID)
+	}
+
+	if got.Name != "Keyboard" {
+		t.Errorf("expected name %q, got %q", "Keyboard", got.Name)
+	}
+}
+
+func TestDeleteProductByCustomID(t *testing.T) {
+	db := setupTestDB(t)
+
+	if err := db.AutoMigrate(&CustomProduct{}); err != nil {
+		t.Fatal(err)
+	}
+
+	product := CustomProduct{
+		ProductID: "sku-123",
+		Name:      "Keyboard",
+	}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	app := forgeapi.New(forgeapi.WithDatabase(db))
+	if err := app.Register(&CustomProduct{}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodDelete,
+		fmt.Sprintf("/customproducts/%s", product.ProductID),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+
+	app.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusNoContent,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+
+	var got CustomProduct
+	err := db.Where("product_id = ?", product.ProductID).First(&got).Error
+
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected product to be deleted, got error: %v", err)
 	}
 }
