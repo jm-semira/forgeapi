@@ -453,6 +453,43 @@ func TestPatchProductReadOnlyField(t *testing.T) {
 	}
 }
 
+func TestPatchProductInvalidFieldType(t *testing.T) {
+	db := setupTestDB(t)
+
+	if err := db.AutoMigrate(&Product{}); err != nil {
+		t.Fatal(err)
+	}
+
+	product := Product{Name: "Mouse", Price: 99.9}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	app := forgeapi.New(forgeapi.WithDatabase(db))
+	if err := app.Register(&Product{}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		fmt.Sprintf("/products/%d", product.ID),
+		strings.NewReader(`{"Price":"not-a-number"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusBadRequest,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+}
+
 func TestPatchProductNotFound(t *testing.T) {
 	db := setupTestDB(t)
 

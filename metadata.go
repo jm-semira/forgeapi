@@ -12,7 +12,7 @@ import (
 type modelMetadata struct {
 	primaryKeyColumn string
 	primaryKeyType   reflect.Type
-	fields           map[string]bool
+	fields           map[string]reflect.Type
 }
 
 func resolveModelMetadata(db *gorm.DB, model any) (modelMetadata, error) {
@@ -44,7 +44,7 @@ func resolveModelMetadata(db *gorm.DB, model any) (modelMetadata, error) {
 		return modelMetadata{}, ErrInvalidModelMetadata
 	}
 
-	fields := make(map[string]bool, len(stmt.Schema.Fields))
+	fields := make(map[string]reflect.Type, len(stmt.Schema.Fields))
 
 	for _, field := range stmt.Schema.Fields {
 		if field.PrimaryKey || field.DBName == "" {
@@ -58,7 +58,7 @@ func resolveModelMetadata(db *gorm.DB, model any) (modelMetadata, error) {
 			continue
 		}
 
-		fields[field.Name] = true
+		fields[field.Name] = field.FieldType
 	}
 
 	return modelMetadata{

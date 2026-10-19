@@ -1,6 +1,7 @@
 package forgeapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -119,7 +120,7 @@ func (app *API) Register(model any) error {
 			return
 		}
 
-		updates := map[string]any{}
+		var updates map[string]json.RawMessage
 		model := reflect.New(modelType).Interface()
 
 		decoder := json.NewDecoder(r.Body)
@@ -139,11 +140,36 @@ func (app *API) Register(model any) error {
 			return
 		}
 
-		for field := range updates {
-			if !metadata.fields[field] {
-				http.Error(w, "unknown update field", http.StatusBadRequest)
+		typedUpdates := make(map[string]any, len(updates))
+
+		for field, raw := range updates {
+			fieldType, ok := metadata.fields[field]
+			if !ok {
+				http.Error(w, "unknown or read-only update field", http.StatusBadRequest)
 				return
 			}
+
+			raw = bytes.TrimSpace(raw)
+
+			if bytes.Equal(raw, []byte("null")) {
+				switch fieldType.Kind() {
+				case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice:
+					typedUpdates[field] = reflect.Zero(fieldType).Interface()
+					continue
+				default:
+					http.Error(w, "invalid field value", http.StatusBadRequest)
+					return
+				}
+			}
+
+			value := reflect.New(fieldType)
+
+			if err := json.Unmarshal(raw, value.Interface()); err != nil {
+				http.Error(w, "invalid field value", http.StatusBadRequest)
+				return
+			}
+
+			typedUpdates[field] = value.Elem().Interface()
 		}
 
 		// check if record is existing
@@ -170,7 +196,7 @@ func (app *API) Register(model any) error {
 				Column: clause.Column{Name: metadata.primaryKeyColumn},
 				Value:  id,
 			}).
-			Updates(updates)
+			Updates(typedUpdates)
 		if result.Error != nil {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
