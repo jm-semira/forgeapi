@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -43,7 +44,105 @@ func (app *API) Register(model any) error {
 	app.mux.HandleFunc("GET "+path, func(w http.ResponseWriter, r *http.Request) {
 		records := reflect.New(reflect.SliceOf(modelType)).Interface()
 
-		result := app.db.WithContext(r.Context()).Find(records)
+		query := app.db.WithContext(r.Context())
+
+		for key, values := range r.URL.Query() {
+			if !strings.HasPrefix(key, "filter[") || !strings.HasSuffix(key, "]") {
+				continue
+			}
+
+			parts := strings.Split(strings.TrimSuffix(strings.TrimPrefix(key, "filter["), "]"), "][")
+			if len(parts) != 2 {
+				http.Error(w, "invalid filter", http.StatusBadRequest)
+				return
+			}
+
+			operator := parts[1]
+			switch operator {
+			case "eq", "gte", "lte":
+			default:
+				http.Error(w, "invalid filter", http.StatusBadRequest)
+				return
+			}
+
+			fieldName := parts[0]
+			fieldInfo, ok := metadata.fields[fieldName]
+			if !ok {
+				http.Error(w, "invalid filter field", http.StatusBadRequest)
+				return
+			}
+
+			if len(values) != 1 {
+				http.Error(w, "invalid filter value", http.StatusBadRequest)
+				return
+			}
+
+			var condition string
+
+			switch operator {
+			case "eq":
+				condition = fieldInfo.dbName + " = ?"
+			case "gte":
+				condition = fieldInfo.dbName + " >= ?"
+			case "lte":
+				condition = fieldInfo.dbName + "<= ?"
+			}
+
+			query = query.Where(condition, values[0])
+		}
+
+		if sortFields := r.URL.Query().Get("sort"); sortFields != "" {
+			for _, sortField := range strings.Split(sortFields, ",") {
+				direction := "ASC"
+
+				if strings.HasPrefix(sortField, "-") {
+					direction = "DESC"
+					sortField = strings.TrimPrefix(sortField, "-")
+				}
+
+				fieldInfo, ok := metadata.fields[sortField]
+				if !ok {
+					http.Error(w, "invalid sort field", http.StatusBadRequest)
+					return
+				}
+
+				query = query.Order(fieldInfo.dbName + " " + direction)
+			}
+		}
+		limit := app.defaultLimit
+
+		if limitField := r.URL.Query().Get("limit"); limitField != "" {
+			parsedLimit, err := strconv.Atoi(limitField)
+			if err != nil || parsedLimit <= 0 {
+				http.Error(w, "invalid limit", http.StatusBadRequest)
+				return
+			}
+
+			if parsedLimit > app.maxLimit {
+				http.Error(w, "limit exceeds maximum", http.StatusBadRequest)
+				return
+			}
+
+			limit = parsedLimit
+		}
+
+		if limit <= 0 || limit > app.maxLimit {
+			http.Error(w, "invalid pagination configuration", http.StatusInternalServerError)
+			return
+		}
+
+		query = query.Limit(limit)
+		if offsetField := r.URL.Query().Get("offset"); offsetField != "" {
+			offset, err := strconv.Atoi(offsetField)
+			if err != nil || offset < 0 {
+				http.Error(w, "invalid offset", http.StatusBadRequest)
+				return
+			}
+
+			query = query.Offset(offset)
+		}
+
+		result := query.Find(records)
 		if result.Error != nil {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return

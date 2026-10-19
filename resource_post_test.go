@@ -46,166 +46,129 @@ func assertPostRejectedWithoutDBChanges(
 }
 
 func TestPostProduct(t *testing.T) {
-	db := setupTestDB(t)
-
-	if err := db.AutoMigrate(&Product{}); err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name      string
+		body      string
+		wantName  string
+		wantPrice float64
+	}{
+		{
+			name:      "all supplied fields",
+			body:      `{"Name":"Mouse","Price":99.9}`,
+			wantName:  "Mouse",
+			wantPrice: 99.9,
+		},
+		{
+			name:     "omitted optional field",
+			body:     `{"Name":"Mouse"}`,
+			wantName: "Mouse",
+		},
 	}
 
-	app := forgeapi.New(forgeapi.WithDatabase(db))
-	if err := app.Register(&Product{}); err != nil {
-		t.Fatal(err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			if err := db.AutoMigrate(&Product{}); err != nil {
+				t.Fatal(err)
+			}
+			app := forgeapi.New(forgeapi.WithDatabase(db))
+			if err := app.Register(&Product{}); err != nil {
+				t.Fatal(err)
+			}
 
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/products",
-		strings.NewReader(`{
-			"Name":"Mouse",
-			"Price":99.9
-		}`),
-	)
+			req := httptest.NewRequest(http.MethodPost, "/products", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rec, req)
 
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, rec.Code, rec.Body.String())
+			}
 
-	app.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf(
-			"expected status %d, got %d: %s",
-			http.StatusCreated,
-			rec.Code,
-			rec.Body.String(),
-		)
-	}
-
-	var got Product
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if got.ID == 0 {
-		t.Error("expected created product to have a non-zero ID")
-	}
-
-	if got.Name != "Mouse" {
-		t.Errorf("expected name %q, got %q", "Mouse", got.Name)
-	}
-
-	if got.Price != 99.9 {
-		t.Errorf("expected price %.2f, got %.2f", 99.9, got.Price)
+			var got Product
+			if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if got.ID == 0 {
+				t.Error("expected created product to have a non-zero ID")
+			}
+			if got.Name != tt.wantName {
+				t.Errorf("expected name %q, got %q", tt.wantName, got.Name)
+			}
+			if got.Price != tt.wantPrice {
+				t.Errorf("expected price %.2f, got %.2f", tt.wantPrice, got.Price)
+			}
+		})
 	}
 }
 
-func TestPostProductTrailingJSON(t *testing.T) {
-	db := setupTestDB(t)
-
-	if err := db.AutoMigrate(&Product{}); err != nil {
-		t.Fatal(err)
+func TestPostValidationRejectsInvalidRequests(t *testing.T) {
+	tests := []struct {
+		name  string
+		model any
+		path  string
+		body  string
+	}{
+		{
+			name:  "trailing JSON",
+			model: &Product{},
+			path:  "/products",
+			body:  `{"Price":399} {"Name":"Unexpected"}`,
+		},
+		{
+			name:  "unknown field",
+			model: &Product{},
+			path:  "/products",
+			body:  `{"UnknownField":"value"}`,
+		},
+		{
+			name:  "read-only canonical field",
+			model: &Product{},
+			path:  "/products",
+			body:  `{"created_at":"2026-01-01T00:00:00Z"}`,
+		},
+		{
+			name:  "invalid field type",
+			model: &Product{},
+			path:  "/products",
+			body:  `{"Price":"not-a-number"}`,
+		},
+		{
+			name:  "empty object",
+			model: &Product{},
+			path:  "/products",
+			body:  `{}`,
+		},
+		{
+			name:  "malformed JSON",
+			model: &Product{},
+			path:  "/products",
+			body:  `{`,
+		},
+		{
+			name:  "noncanonical JSON field name",
+			model: &CustomProduct{},
+			path:  "/customproducts",
+			body:  `{"Name":"Keyboard"}`,
+		},
 	}
 
-	app := forgeapi.New(forgeapi.WithDatabase(db))
-	if err := app.Register(&Product{}); err != nil {
-		t.Fatal(err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			if err := db.AutoMigrate(tt.model); err != nil {
+				t.Fatal(err)
+			}
+			app := forgeapi.New(forgeapi.WithDatabase(db))
+			if err := app.Register(tt.model); err != nil {
+				t.Fatal(err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			assertPostRejectedWithoutDBChanges(t, db, tt.model, app, req)
+		})
 	}
-
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/products",
-		strings.NewReader(`{"Price":399} {"Name":"Unexpected"}`),
-	)
-	req.Header.Set("Content-Type", "application/json")
-
-	assertPostRejectedWithoutDBChanges(t, db, &Product{}, app, req)
-}
-
-func TestPostProductUnknownField(t *testing.T) {
-	db := setupTestDB(t)
-
-	if err := db.AutoMigrate(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	app := forgeapi.New(forgeapi.WithDatabase(db))
-	if err := app.Register(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/products",
-		strings.NewReader(`{"UnknownField":"value"}`),
-	)
-	req.Header.Set("Content-Type", "application/json")
-
-	assertPostRejectedWithoutDBChanges(t, db, &Product{}, app, req)
-}
-
-func TestPostProductReadOnlyField(t *testing.T) {
-	db := setupTestDB(t)
-
-	if err := db.AutoMigrate(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	app := forgeapi.New(forgeapi.WithDatabase(db))
-	if err := app.Register(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/products",
-		strings.NewReader(`{"created_at":"2026-01-01T00:00:00Z"}`),
-	)
-	req.Header.Set("Content-Type", "application/json")
-
-	assertPostRejectedWithoutDBChanges(t, db, &Product{}, app, req)
-}
-
-func TestPostProductInvalidFieldType(t *testing.T) {
-	db := setupTestDB(t)
-
-	if err := db.AutoMigrate(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	app := forgeapi.New(forgeapi.WithDatabase(db))
-	if err := app.Register(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/products",
-		strings.NewReader(`{"Price":"not-a-number"}`),
-	)
-	req.Header.Set("Content-Type", "application/json")
-
-	assertPostRejectedWithoutDBChanges(t, db, &Product{}, app, req)
-}
-
-func TestPostProductEmptyBody(t *testing.T) {
-	db := setupTestDB(t)
-
-	if err := db.AutoMigrate(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	app := forgeapi.New(forgeapi.WithDatabase(db))
-	if err := app.Register(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/products",
-		strings.NewReader(`{}`),
-	)
-
-	req.Header.Set("Content-Type", "application/json")
-	assertPostRejectedWithoutDBChanges(t, db, &Product{}, app, req)
 }
 
 func TestPostCustomProductCanonicalJSONField(t *testing.T) {
@@ -231,22 +194,4 @@ func TestPostCustomProductCanonicalJSONField(t *testing.T) {
 		t.Fatalf("expected status %d, got %d: %s",
 			http.StatusCreated, rec.Code, rec.Body.String())
 	}
-}
-
-func TestPostCustomProductRejectsNonCanonicalJSONField(t *testing.T) {
-	db := setupTestDB(t)
-	if err := db.AutoMigrate(&CustomProduct{}); err != nil {
-		t.Fatal(err)
-	}
-	app := forgeapi.New(forgeapi.WithDatabase(db))
-	if err := app.Register(&CustomProduct{}); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/customproducts",
-		strings.NewReader(`{"Name":"Keyboard"}`),
-	)
-	assertPostRejectedWithoutDBChanges(t, db, &CustomProduct{}, app, req)
 }

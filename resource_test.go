@@ -18,6 +18,12 @@ type Product struct {
 	Price float64
 }
 
+type JsonTaggedProduct struct {
+	forgeapi.Model
+	Name  string  `json:"name"`
+	Price float64 `json:"price"`
+}
+
 type CustomProduct struct {
 	ProductID string `json:"product_id" gorm:"primaryKey" forgeapi:"id"`
 	Name      string `json:"name"`
@@ -61,41 +67,42 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func TestRegisterModelWithUnsupportedIDType(t *testing.T) {
-	db := setupTestDB(t)
-
-	if err := db.AutoMigrate(&InvalidIDProduct{}); err != nil {
-		t.Fatal(err)
+func TestRegisterModelValidationErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		model   any
+		wantErr error
+	}{
+		{
+			name:    "unsupported ID type",
+			model:   &InvalidIDProduct{},
+			wantErr: forgeapi.ErrUnsupportedIdentifierType,
+		},
+		{
+			name:    "composite primary key",
+			model:   &CompositeIDProduct{},
+			wantErr: forgeapi.ErrInvalidModelMetadata,
+		},
+		{
+			name:    "missing ID metadata",
+			model:   &MissingIDProduct{},
+			wantErr: forgeapi.ErrInvalidModelMetadata,
+		},
 	}
 
-	app := forgeapi.New(forgeapi.WithDatabase(db))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			if err := db.AutoMigrate(tt.model); err != nil {
+				t.Fatal(err)
+			}
+			app := forgeapi.New(forgeapi.WithDatabase(db))
 
-	err := app.Register(&InvalidIDProduct{})
-	if !errors.Is(err, forgeapi.ErrUnsupportedIdentifierType) {
-		t.Fatalf(
-			"expected error %v, got %v",
-			forgeapi.ErrUnsupportedIdentifierType,
-			err,
-		)
-	}
-}
-
-func TestRegisterModelWithCompositePrimaryKey(t *testing.T) {
-	db := setupTestDB(t)
-
-	if err := db.AutoMigrate(&CompositeIDProduct{}); err != nil {
-		t.Fatal(err)
-	}
-
-	app := forgeapi.New(forgeapi.WithDatabase(db))
-
-	err := app.Register(&CompositeIDProduct{})
-	if !errors.Is(err, forgeapi.ErrInvalidModelMetadata) {
-		t.Fatalf(
-			"expected error %v, got %v",
-			forgeapi.ErrInvalidModelMetadata,
-			err,
-		)
+			err := app.Register(tt.model)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Register() error = %v, want %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -168,15 +175,5 @@ func TestModelCreatesIDAndTimestamps(t *testing.T) {
 
 	if product.UpdatedAt.IsZero() {
 		t.Fatal("expected UpdatedAt to be populated")
-	}
-}
-
-func TestRegisterModelWithoutID(t *testing.T) {
-	db := setupTestDB(t)
-	app := forgeapi.New(forgeapi.WithDatabase(db))
-
-	err := app.Register(&MissingIDProduct{})
-	if err == nil {
-		t.Fatal("expected error when registering a model without an ID")
 	}
 }

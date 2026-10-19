@@ -71,151 +71,47 @@ func TestPatchProduct(t *testing.T) {
 	}
 }
 
-func TestPatchProductTrailingJSON(t *testing.T) {
+func TestPatchProductValidationRejectsInvalidRequests(t *testing.T) {
 	db := setupTestDB(t)
-
 	if err := db.AutoMigrate(&Product{}); err != nil {
 		t.Fatal(err)
 	}
-
 	product := Product{Name: "Mouse", Price: 99.9}
 	if err := db.Create(&product).Error; err != nil {
 		t.Fatal(err)
 	}
-
 	app := forgeapi.New(forgeapi.WithDatabase(db))
 	if err := app.Register(&Product{}); err != nil {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(
-		http.MethodPatch,
-		fmt.Sprintf("/products/%d", product.ID),
-		strings.NewReader(`{"Price":399} {"Name":"Unexpected"}`),
-	)
-	req.Header.Set("Content-Type", "application/json")
-
-	rec := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf(
-			"expected status %d, got %d: %s",
-			http.StatusBadRequest,
-			rec.Code,
-			rec.Body.String(),
-		)
-	}
-}
-
-func TestPatchProductUnknownField(t *testing.T) {
-	db := setupTestDB(t)
-
-	if err := db.AutoMigrate(&Product{}); err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "trailing JSON", body: `{"Price":399} {"Name":"Unexpected"}`},
+		{name: "unknown field", body: `{"UnknownField":"value"}`},
+		{name: "read-only canonical field", body: `{"created_at":"2026-01-01T00:00:00Z"}`},
+		{name: "invalid field type", body: `{"Price":"not-a-number"}`},
+		{name: "empty object", body: `{}`},
+		{name: "malformed JSON", body: `{`},
 	}
 
-	product := Product{Name: "Mouse", Price: 99.9}
-	if err := db.Create(&product).Error; err != nil {
-		t.Fatal(err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(
+				http.MethodPatch,
+				fmt.Sprintf("/products/%d", product.ID),
+				strings.NewReader(tt.body),
+			)
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rec, req)
 
-	app := forgeapi.New(forgeapi.WithDatabase(db))
-	if err := app.Register(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(
-		http.MethodPatch,
-		fmt.Sprintf("/products/%d", product.ID),
-		strings.NewReader(`{"UnknownField":"value"}`),
-	)
-	req.Header.Set("Content-Type", "application/json")
-
-	rec := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf(
-			"expected status %d, got %d: %s",
-			http.StatusBadRequest,
-			rec.Code,
-			rec.Body.String(),
-		)
-	}
-}
-
-func TestPatchProductReadOnlyField(t *testing.T) {
-	db := setupTestDB(t)
-
-	if err := db.AutoMigrate(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	product := Product{Name: "Mouse", Price: 99.9}
-	if err := db.Create(&product).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	app := forgeapi.New(forgeapi.WithDatabase(db))
-	if err := app.Register(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(
-		http.MethodPatch,
-		fmt.Sprintf("/products/%d", product.ID),
-		strings.NewReader(`{"CreatedAt":"2026-01-01T00:00:00Z"}`),
-	)
-	req.Header.Set("Content-Type", "application/json")
-
-	rec := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf(
-			"expected status %d, got %d: %s",
-			http.StatusBadRequest,
-			rec.Code,
-			rec.Body.String(),
-		)
-	}
-}
-
-func TestPatchProductInvalidFieldType(t *testing.T) {
-	db := setupTestDB(t)
-
-	if err := db.AutoMigrate(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	product := Product{Name: "Mouse", Price: 99.9}
-	if err := db.Create(&product).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	app := forgeapi.New(forgeapi.WithDatabase(db))
-	if err := app.Register(&Product{}); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(
-		http.MethodPatch,
-		fmt.Sprintf("/products/%d", product.ID),
-		strings.NewReader(`{"Price":"not-a-number"}`),
-	)
-	req.Header.Set("Content-Type", "application/json")
-
-	rec := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf(
-			"expected status %d, got %d: %s",
-			http.StatusBadRequest,
-			rec.Code,
-			rec.Body.String(),
-		)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 
